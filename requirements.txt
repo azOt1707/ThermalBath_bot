@@ -1,0 +1,6 @@
+python-telegram-bot
+python-telegram-bot-calendar
+pandas
+openpyxl
+psycopg2-binary
+python-dotenv
