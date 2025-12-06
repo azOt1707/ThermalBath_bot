@@ -34,10 +34,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- КОНСТАНТЫ И НАСТРОЙКИ ---
-# Справочник отделов
+
+# Справочник отделов (ОБНОВЛЕНО: Локеры вместо Ресторана)
 DEPT_MAP = {
     "rescue": "🆘 Спасатели",
-    "kitchen": "🍔 Ресторан",
+    "lockers": "🔐 Локеры",
     "admin": "👨‍💻 Админ.",
     "tech": "🔧 Тех. отдел"
 }
@@ -99,7 +100,6 @@ def get_user_name(user_id):
 def register_user_db(user_id, real_name):
     conn = get_db_connection()
     cursor = conn.cursor()
-    # Синтаксис PostgreSQL для Upsert (Вставить или Обновить)
     cursor.execute("""
         INSERT INTO users (user_id, real_name) 
         VALUES (%s, %s)
@@ -109,15 +109,6 @@ def register_user_db(user_id, real_name):
     conn.commit()
     cursor.close()
     conn.close()
-
-def check_entry_exists(user_id, date_str):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM records WHERE user_id = %s AND date = %s", (user_id, date_str))
-    exists = cursor.fetchone()
-    cursor.close()
-    conn.close()
-    return exists is not None
 
 # --- ФУНКЦИЯ ОЧИСТКИ (ДЛЯ АДМИНА) ---
 def clear_all_records():
@@ -198,7 +189,6 @@ def validate_time_format(time_text):
 # --- ГЕНЕРАЦИЯ ТАБЕЛЯ ---
 def generate_timesheet():
     conn = get_db_connection()
-    # Pandas умеет читать из Postgres через psycopg2
     try:
         df = pd.read_sql_query("SELECT * FROM records", conn)
     except Exception as e:
@@ -221,9 +211,11 @@ def generate_timesheet():
             # Учет ночной смены
             if t2 < t1: t2 += timedelta(days=1)
             
-            # Часы
+            # 1. Считаем "грязное" время в часах
             raw_hours = (t2 - t1).total_seconds() / 3600
-            net_hours = max(0, raw_hours - 0.5)
+            
+            # 2. Вычитаем 1 ЧАС (1.0) на обед (ОБНОВЛЕНО)
+            net_hours = max(0, raw_hours - 1.0)
             
             return round(net_hours, 2)
         except: return 0
@@ -262,7 +254,18 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if get_user_name(update.effective_user.id):
         await update.message.reply_text("👋 Меню:", reply_markup=MAIN_MENU_KEYBOARD)
         return ConversationHandler.END
-    await update.message.reply_text("👋 Введите <b>Фамилию и Имя</b>:", parse_mode='HTML', reply_markup=ReplyKeyboardRemove())
+    
+    # ОБНОВЛЕННОЕ ПРИВЕТСТВИЕ
+    welcome_text = (
+        "👋 <b>Добро пожаловать в электронный табель «Термы»!</b>\n\n"
+        "Я помогу вам фиксировать рабочие смены.\n\n"
+        "ℹ️ <b>Важные правила:</b>\n"
+        "1. Время указывайте <b>строго по графику</b> (например, 09:00).\n"
+        "2. Программа автоматически вычитает <b>1 час</b> на обед.\n\n"
+        "🚀 <b>Для начала регистрации напишите вашу Фамилию и Имя:</b>"
+    )
+    
+    await update.message.reply_text(welcome_text, parse_mode='HTML', reply_markup=ReplyKeyboardRemove())
     return REGISTER_NAME
 
 async def receive_registration_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -388,11 +391,10 @@ async def manual_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_report_job(context)
 
 if __name__ == '__main__':
-    # Проверка наличия ссылки на БД
     if not DATABASE_URL:
         print("ОШИБКА: Не задан DATABASE_URL в .env")
     else:
-        init_db() # Создание таблиц в Postgres
+        init_db()
         application = ApplicationBuilder().token(TOKEN).build()
         
         conv_reg = ConversationHandler(
@@ -429,5 +431,5 @@ if __name__ == '__main__':
         
         application.job_queue.run_daily(send_report_job, time=time(hour=23, minute=0), days=(6,))
         
-        print("Бот (PostgreSQL Version) запущен!")
+        print("Бот (PostgreSQL: Локеры + 1ч обед) запущен!")
         application.run_polling()
